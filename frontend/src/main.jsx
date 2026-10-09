@@ -8,7 +8,9 @@ import React, {
 import { createRoot } from "react-dom/client";
 import "./style.css";
 
-const API = "http://localhost:5000/api";
+
+const API = "https://saasquatch-smartfollowup.onrender.com/api";
+
 const apiRequest = async (
   url,
   options = {}
