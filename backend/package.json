@@ -1,0 +1,1 @@
+{"name":"saasquatch-followup-api","version":"1.0.0","type":"module","scripts":{"dev":"node --watch server.js","start":"node server.js"},"dependencies":{"cors":"^2.8.5","dotenv":"^16.4.5","express":"^4.21.2","mongoose":"^8.24.5","resend":"^6.32.1"}}
