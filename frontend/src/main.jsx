@@ -598,6 +598,9 @@ if (!selected) return;
   const editScheduled = (item, mode) => {
     setSubject(item.subject || "");
     setBody(item.body || "");
+    setRecipientEmail(
+  item.recipientEmail || selected?.email || ""
+);
 
     /*
       Store the exact MongoDB history subdocument ID.
@@ -634,118 +637,104 @@ if (!selected) return;
   // UPDATE SCHEDULED FOLLOW-UP
   // ----------------------------------------------------
 
-   const updateScheduled = async () => {
-  if (
-    !selected ||
-    !editingHistoryId
-  ) {
-    return;
-  }
+  const updateScheduled = async () => {
+    if (!selected || !editingHistoryId) {
+      return;
+    }
 
-  if (!subject.trim()) {
-    setMsg(
-      "Subject is required."
-    );
-    setMsgType("error");
-    return;
-  }
+    if (!recipientEmail.trim()) {
+      setMsg("Recipient email is required.");
+      setMsgType("error");
+      return;
+    }
 
-  if (!body.trim()) {
-    setMsg(
-      "Message is required."
-    );
-    setMsgType("error");
-    return;
-  }
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailPattern.test(recipientEmail.trim())) {
+      setMsg("Please enter a valid recipient email address.");
+      setMsgType("error");
+      return;
+    }
 
-  if (!schedule) {
-    setMsg(
-      "Schedule date and time are required."
-    );
-    setMsgType("error");
-    return;
-  }
+    if (!subject.trim()) {
+      setMsg("Subject is required.");
+      setMsgType("error");
+      return;
+    }
 
-  const scheduledDate = new Date(
-    schedule
-  );
+    if (!body.trim()) {
+      setMsg("Message is required.");
+      setMsgType("error");
+      return;
+    }
 
-  if (
-    Number.isNaN(
-      scheduledDate.getTime()
-    )
-  ) {
-    setMsg(
-      "Please select a valid schedule date and time."
-    );
-    setMsgType("error");
-    return;
-  }
+    if (!schedule) {
+      setMsg("Schedule date and time are required.");
+      setMsgType("error");
+      return;
+    }
 
-  if (
-    scheduledDate.getTime() <=
-    Date.now()
-  ) {
-    setMsg(
-      "Please choose a future date and time."
-    );
-    setMsgType("error");
-    return;
-  }
+    const scheduledDate = new Date(schedule);
 
-  setBusy(true);
-  setBusyAction("update");
-  setMsg("");
-  setMsgType("");
+    if (
+      Number.isNaN(scheduledDate.getTime()) ||
+      scheduledDate.getTime() <= Date.now()
+    ) {
+      setMsg("Please choose a valid future date and time.");
+      setMsgType("error");
+      return;
+    }
 
-  try {
-    const r = await apiRequest(
-      `${API}/leads/${selected.id}/follow-up/scheduled`,
-      {
-        method: "PATCH",
-        headers: {
-          "Content-Type":
-            "application/json",
-        },
-        body: JSON.stringify({
-          historyId:
-            editingHistoryId,
-          subject,
-          body,
-          scheduledAt:
-            scheduledDate.toISOString(),
-        }),
-      }
-    );
+    setBusy(true);
+    setBusyAction("update");
+    setMsg("");
+    setMsgType("");
 
-    setMsg(
-      r.message ||
-        "Scheduled follow-up updated successfully."
-    );
-    setMsgType("success");
+    try {
+      const r = await apiRequest(
+        `${API}/leads/${selected.id}/follow-up/scheduled`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            historyId: editingHistoryId,
+            recipientEmail: recipientEmail.trim(),
+            subject: subject.trim(),
+            body: body.trim(),
+            scheduledAt: scheduledDate.toISOString(),
+          }),
+        }
+      );
 
-    setSelected(null);
-    setDraft(null);
-    setEditMode(null);
-    setEditingHistoryId(null);
+      setMsg(
+        r.message || "Scheduled follow-up updated successfully."
+      );
+      setMsgType("success");
 
-    await load();
-  } catch (error) {
-    console.error(
-      "Failed to update scheduled follow-up:",
-      error
-    );
+      // Refresh the leads list after the backend confirms the update.
+      await load();
 
-    setMsg(
-      error.message ||
-        "Failed to update scheduled follow-up."
-    );
-    setMsgType("error");
-  } finally {
-    setBusy(false);
-    setBusyAction("");
-  }
-};
+      setSelected(null);
+      setDraft(null);
+      setEditMode(null);
+      setEditingHistoryId(null);
+    } catch (error) {
+      console.error(
+        "Failed to update scheduled follow-up:",
+        error
+      );
+
+      setMsg(
+        error.message || "Failed to update scheduled follow-up."
+      );
+      setMsgType("error");
+    } finally {
+      setBusy(false);
+      setBusyAction("");
+    }
+  };
+
 
   // ----------------------------------------------------
   // CANCEL SCHEDULED FOLLOW-UP
