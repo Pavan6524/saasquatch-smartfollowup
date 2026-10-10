@@ -1,13 +1,12 @@
+
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
 import Lead from "./src/models/Lead.js";
-import nodemailer from "nodemailer";
 import { startFollowUpWorker } from "./src/services/followUpWorker.js";
 
 dotenv.config();
-
 
 const app = express();
 
@@ -15,8 +14,10 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 5000;
+
 const MONGODB_URI =
-  process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/saasquatch";
+  process.env.MONGODB_URI ||
+  "mongodb://127.0.0.1:27017/saasquatch";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -29,31 +30,6 @@ function validateRecipientEmail(value) {
     ? email
     : null;
 }
-
-function createTransporter() {
-  const {
-    SMTP_HOST,
-    SMTP_PORT,
-    SMTP_USER,
-    SMTP_PASS,
-  } = process.env;
-
-  if (!SMTP_HOST || !SMTP_PORT || !SMTP_USER || !SMTP_PASS) {
-    throw new Error("Gmail SMTP is not configured.");
-  }
-
-  return nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: Number(SMTP_PORT),
-    secure: Number(SMTP_PORT) === 465,
-    auth: {
-      user: SMTP_USER,
-      pass: SMTP_PASS,
-    },
-  });
-}
-
-
 // ----------------------------------------------------
 // DEMO DATA
 // ----------------------------------------------------
@@ -293,17 +269,12 @@ app.post("/api/leads/:id/follow-up/send", async (req, res) => {
         message: "Subject and body are required.",
       });
     }
-
-   if (
-  !process.env.SMTP_HOST ||
-  !process.env.SMTP_PORT ||
-  !process.env.SMTP_USER ||
-  !process.env.SMTP_PASS
-) {
+if (!process.env.RESEND_API_KEY || !process.env.RESEND_FROM_EMAIL) {
   return res.status(503).json({
-    message: "Gmail SMTP is not configured on the server.",
+    message: "Resend email service is not configured on the server.",
   });
 }
+
 
     const lead = await Lead.findById(req.params.id);
 
@@ -312,14 +283,33 @@ app.post("/api/leads/:id/follow-up/send", async (req, res) => {
         message: "Lead not found",
       });
     }
-const transporter = createTransporter();
 
-const info = await transporter.sendMail({
-  from: process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER,
-  to: recipientEmail,
-  subject: subject.trim(),
-  text: body.trim(),
+if (!process.env.RESEND_API_KEY || !process.env.RESEND_FROM_EMAIL) {
+  throw new Error("Resend email service is not configured.");
+}
+
+const response = await fetch("https://api.resend.com/emails", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    from: process.env.RESEND_FROM_EMAIL,
+    to: [recipientEmail],
+    subject: subject.trim(),
+    text: body.trim(),
+  }),
 });
+
+const result = await response.json();
+
+if (!response.ok) {
+  throw new Error(result.message || "Resend failed to send the email.");
+}
+
+const info = result;
+
 
     const now = new Date();
 
@@ -346,15 +336,15 @@ const info = await transporter.sendMail({
     }
 
     await lead.save();
+   res.json({
+  message: `Email accepted by Resend for ${recipientEmail}.`,
+  emailId: info.id || null,
+  lead: {
+    ...lead.toObject(),
+    id: lead._id.toString(),
+  },
+});
 
-    res.json({
-    message: `Email accepted by Gmail SMTP for ${recipientEmail}.`,
-emailId: info.messageId || null,
-      lead: {
-        ...lead.toObject(),
-        id: lead._id.toString(),
-      },
-    });
   } catch (error) {
     console.error("Email sending failed:", error);
 

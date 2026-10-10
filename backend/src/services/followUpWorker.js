@@ -1,30 +1,10 @@
 
-import nodemailer from "nodemailer";
 import Lead from "../models/Lead.js";
 
 const WORKER_INTERVAL = 10 * 1000;
 const MAX_RETRIES = 3;
 
 let workerRunning = false;
-
-function createTransporter() {
-  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } =
-    process.env;
-
-  if (!SMTP_HOST || !SMTP_PORT || !SMTP_USER || !SMTP_PASS) {
-    throw new Error("Gmail SMTP environment variables are missing.");
-  }
-
-  return nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: Number(SMTP_PORT),
-    secure: Number(SMTP_PORT) === 465,
-    auth: {
-      user: SMTP_USER,
-      pass: SMTP_PASS,
-    },
-  });
-}
 
 function getScheduledFollowUps(lead) {
   return lead.history
@@ -55,8 +35,47 @@ function syncLeadState(lead) {
   }
 }
 
+async function sendEmailWithResend({ recipient, subject, body }) {
+  const { RESEND_API_KEY, RESEND_FROM_EMAIL } = process.env;
+
+  if (!RESEND_API_KEY || !RESEND_FROM_EMAIL) {
+    throw new Error(
+      "Resend email service is not configured."
+    );
+  }
+
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: RESEND_FROM_EMAIL,
+      to: [recipient],
+      subject,
+      text: body,
+    }),
+  });
+
+  const result = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(
+      result.message || `Resend request failed with status ${response.status}.`
+    );
+  }
+
+  if (!result.id) {
+    throw new Error("Resend did not return an email ID.");
+  }
+
+  return result;
+}
+
 async function processScheduledFollowUps() {
   if (workerRunning) return;
+
   workerRunning = true;
 
   try {
@@ -92,27 +111,26 @@ async function processScheduledFollowUps() {
 
         if (!recipient) {
           followUp.status = "FAILED";
-          followUp.lastError = "No recipient email address was saved.";
+          followUp.lastError =
+            "No recipient email address was saved.";
           continue;
         }
 
-        if (followUp.attempts >= MAX_RETRIES) {
+        if ((followUp.attempts || 0) >= MAX_RETRIES) {
           followUp.status = "FAILED";
           followUp.lastError =
-            followUp.lastError || "Maximum sending attempts reached.";
+            followUp.lastError ||
+            "Maximum sending attempts reached.";
           continue;
         }
 
-        followUp.attempts += 1;
+        followUp.attempts = (followUp.attempts || 0) + 1;
 
         try {
-          const transporter = createTransporter();
-
-          const info = await transporter.sendMail({
-            from: process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER,
-            to: recipient,
+          const info = await sendEmailWithResend({
+            recipient,
             subject: followUp.subject,
-            text: followUp.body,
+            body: followUp.body,
           });
 
           followUp.status = "SENT";
@@ -122,7 +140,7 @@ async function processScheduledFollowUps() {
           lead.lastContacted = new Date();
 
           console.log(
-            `Email accepted by Gmail SMTP for ${recipient}. Message ID: ${info.messageId}`
+            `Email accepted by Resend for ${recipient}. Email ID: ${info.id}`
           );
         } catch (error) {
           followUp.lastError =
@@ -145,7 +163,10 @@ async function processScheduledFollowUps() {
       }
     }
   } catch (error) {
-    console.error("Scheduled follow-up worker error:", error);
+    console.error(
+      "Scheduled follow-up worker error:",
+      error
+    );
   } finally {
     workerRunning = false;
   }
@@ -153,7 +174,7 @@ async function processScheduledFollowUps() {
 
 export function startFollowUpWorker() {
   console.log(
-    "Gmail follow-up worker started. Checking every 10 seconds."
+    "Resend follow-up worker started. Checking every 10 seconds."
   );
 
   processScheduledFollowUps();
