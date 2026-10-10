@@ -1267,3 +1267,10 @@ table td button:active:not(:disabled) {
   border-radius: 9px;
   transition:
     background
+    .leads-table-container {
+  min-height: 280px;
+  overflow-x: auto;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}

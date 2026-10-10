@@ -1,12 +1,30 @@
-import { Resend } from "resend";
+
+import nodemailer from "nodemailer";
 import Lead from "../models/Lead.js";
 
-const WORKER_INTERVAL = 10 * 1000; // 10 seconds
+const WORKER_INTERVAL = 10 * 1000;
 const MAX_RETRIES = 3;
 
-// ----------------------------------------------------
-// GET SCHEDULED FOLLOW-UPS
-// ----------------------------------------------------
+let workerRunning = false;
+
+function createTransporter() {
+  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } =
+    process.env;
+
+  if (!SMTP_HOST || !SMTP_PORT || !SMTP_USER || !SMTP_PASS) {
+    throw new Error("Gmail SMTP environment variables are missing.");
+  }
+
+  return nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: Number(SMTP_PORT),
+    secure: Number(SMTP_PORT) === 465,
+    auth: {
+      user: SMTP_USER,
+      pass: SMTP_PASS,
+    },
+  });
+}
 
 function getScheduledFollowUps(lead) {
   return lead.history
@@ -22,39 +40,24 @@ function getScheduledFollowUps(lead) {
     );
 }
 
-// ----------------------------------------------------
-// SYNC LEAD STATE
-// ----------------------------------------------------
-
 function syncLeadState(lead) {
   const scheduled = getScheduledFollowUps(lead);
 
   if (scheduled.length > 0) {
     lead.status = "FOLLOW_UP_DUE";
-
     lead.nextFollowUp =
-      scheduled[0].scheduledAt ||
-      scheduled[0].date;
+      scheduled[0].scheduledAt || scheduled[0].date;
   } else {
     lead.nextFollowUp = null;
 
-    const hasOutreach =
-      lead.history.length > 0;
-
-    lead.status = hasOutreach
-      ? "CONTACTED"
-      : "NOT_CONTACTED";
+    const hasOutreach = lead.history.length > 0;
+    lead.status = hasOutreach ? "CONTACTED" : "NOT_CONTACTED";
   }
 }
 
-// ----------------------------------------------------
-// PROCESS SCHEDULED FOLLOW-UPS
-// ----------------------------------------------------
-
 async function processScheduledFollowUps() {
-  const resend = new Resend(
-    process.env.RESEND_API_KEY
-  );
+  if (workerRunning) return;
+  workerRunning = true;
 
   try {
     const now = new Date();
@@ -64,181 +67,96 @@ async function processScheduledFollowUps() {
         $elemMatch: {
           type: "FOLLOW_UP",
           status: "SCHEDULED",
-          scheduledAt: {
-            $lte: now,
-          },
+          scheduledAt: { $lte: now },
         },
       },
     });
 
-    if (leads.length === 0) {
-      return;
-    }
-
     for (const lead of leads) {
-      const dueFollowUps =
-        lead.history.filter(
-          (item) =>
-            item.type === "FOLLOW_UP" &&
-            item.status === "SCHEDULED" &&
-            item.scheduledAt &&
-            new Date(item.scheduledAt) <= now
-        );
+      let changed = false;
 
-      for (const followUp of dueFollowUps) {
+      for (const followUp of lead.history) {
+        if (
+          followUp.type !== "FOLLOW_UP" ||
+          followUp.status !== "SCHEDULED" ||
+          !followUp.scheduledAt ||
+          new Date(followUp.scheduledAt) > now
+        ) {
+          continue;
+        }
+
+        changed = true;
+
+        const recipient =
+          followUp.recipientEmail || lead.email;
+
+        if (!recipient) {
+          followUp.status = "FAILED";
+          followUp.lastError = "No recipient email address was saved.";
+          continue;
+        }
+
+        if (followUp.attempts >= MAX_RETRIES) {
+          followUp.status = "FAILED";
+          followUp.lastError =
+            followUp.lastError || "Maximum sending attempts reached.";
+          continue;
+        }
+
+        followUp.attempts += 1;
+
         try {
-          /*
-            Make sure the retry counter exists.
-          */
-          if (
-            typeof followUp.attempts !==
-            "number"
-          ) {
-            followUp.attempts = 0;
-          }
+          const transporter = createTransporter();
 
-          /*
-            Stop retrying after the maximum number
-            of attempts.
-          */
-          if (
-            followUp.attempts >= MAX_RETRIES
-          ) {
-            followUp.status = "FAILED";
-
-            followUp.lastError =
-              "Maximum email delivery attempts reached.";
-
-            console.error(
-              `Maximum retries reached for ${lead.company}`
-            );
-
-            continue;
-          }
-
-          followUp.attempts += 1;
-
-          console.log(
-            `Sending scheduled follow-up to ${lead.email}...`
-          );
-
-          console.log(
-            `Attempt ${followUp.attempts}/${MAX_RETRIES}`
-          );
-
-          const { data, error } =
-            await resend.emails.send({
-              from: process.env.RESEND_FROM_EMAIL,
-              to: [lead.email],
-              subject: followUp.subject,
-              text: followUp.body,
-            });
-
-          // ------------------------------------------------
-          // RESEND RETURNED AN ERROR
-          // ------------------------------------------------
-
-          if (error) {
-            console.error(
-              `Failed to send scheduled follow-up for ${lead.company}:`,
-              error
-            );
-
-            followUp.lastError =
-              error.message ||
-              JSON.stringify(error);
-
-            /*
-              If this was the final attempt,
-              mark the follow-up as FAILED.
-            */
-            if (
-              followUp.attempts >= MAX_RETRIES
-            ) {
-              followUp.status = "FAILED";
-
-              console.error(
-                `Follow-up permanently failed for ${lead.company}`
-              );
-            }
-
-            continue;
-          }
-
-          // ------------------------------------------------
-          // SUCCESS
-          // ------------------------------------------------
+          const info = await transporter.sendMail({
+            from: process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER,
+            to: recipient,
+            subject: followUp.subject,
+            text: followUp.body,
+          });
 
           followUp.status = "SENT";
           followUp.sentAt = new Date();
-
           followUp.lastError = null;
 
-          lead.lastContacted =
-            new Date();
+          lead.lastContacted = new Date();
 
           console.log(
-            `Scheduled follow-up sent successfully to ${lead.email}`
-          );
-
-          console.log(
-            `Resend email ID: ${
-              data?.id || "unknown"
-            }`
+            `Email accepted by Gmail SMTP for ${recipient}. Message ID: ${info.messageId}`
           );
         } catch (error) {
-          console.error(
-            `Error sending scheduled follow-up for ${lead.company}:`,
-            error
-          );
-
-          if (
-            typeof followUp.attempts !==
-            "number"
-          ) {
-            followUp.attempts = 0;
-          }
-
           followUp.lastError =
-            error.message ||
-            "Unknown email sending error";
+            error?.message || "Unknown email sending error";
 
-          if (
-            followUp.attempts >= MAX_RETRIES
-          ) {
+          if (followUp.attempts >= MAX_RETRIES) {
             followUp.status = "FAILED";
           }
+
+          console.error(
+            `Email attempt ${followUp.attempts}/${MAX_RETRIES} failed for ${recipient}:`,
+            followUp.lastError
+          );
         }
       }
 
-      // Keep lead status and nextFollowUp synchronized.
-      syncLeadState(lead);
-
-      await lead.save();
+      if (changed) {
+        syncLeadState(lead);
+        await lead.save();
+      }
     }
   } catch (error) {
-    console.error(
-      "Scheduled follow-up worker error:",
-      error
-    );
+    console.error("Scheduled follow-up worker error:", error);
+  } finally {
+    workerRunning = false;
   }
 }
 
-// ----------------------------------------------------
-// START WORKER
-// ----------------------------------------------------
-
 export function startFollowUpWorker() {
   console.log(
-    "Follow-up worker started. Checking every 10 seconds."
+    "Gmail follow-up worker started. Checking every 10 seconds."
   );
 
-  // Run immediately when the server starts.
   processScheduledFollowUps();
 
-  // Continue checking every 10 seconds.
-  setInterval(
-    processScheduledFollowUps,
-    WORKER_INTERVAL
-  );
+  setInterval(processScheduledFollowUps, WORKER_INTERVAL);
 }

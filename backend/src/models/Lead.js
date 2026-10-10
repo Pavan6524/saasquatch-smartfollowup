@@ -1,3 +1,4 @@
+
 import mongoose from "mongoose";
 
 const outreachSchema = new mongoose.Schema(
@@ -18,26 +19,33 @@ const outreachSchema = new mongoose.Schema(
       required: true,
     },
 
+    recipientEmail: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      default: "",
+    },
+
     date: {
       type: Date,
       required: true,
     },
 
-   status: {
-  type: String,
-  enum: ["SENT", "SCHEDULED", "FAILED"],
-  default: "SCHEDULED",
-},
+    status: {
+      type: String,
+      enum: ["SENT", "SCHEDULED", "FAILED", "CANCELLED"],
+      default: "SCHEDULED",
+    },
 
-attempts: {
-  type: Number,
-  default: 0,
-},
+    attempts: {
+      type: Number,
+      default: 0,
+    },
 
-lastError: {
-  type: String,
-  default: null,
-},
+    lastError: {
+      type: String,
+      default: null,
+    },
 
     scheduledAt: {
       type: Date,
@@ -58,22 +66,27 @@ const leadSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+
     contact: {
       type: String,
       required: true,
     },
+
     title: {
       type: String,
       default: "",
     },
+
     email: {
       type: String,
       required: true,
     },
+
     industry: {
       type: String,
       default: "",
     },
+
     status: {
       type: String,
       enum: [
@@ -84,14 +97,17 @@ const leadSchema = new mongoose.Schema(
       ],
       default: "NOT_CONTACTED",
     },
+
     lastContacted: {
       type: Date,
       default: null,
     },
+
     nextFollowUp: {
       type: Date,
       default: null,
     },
+
     history: {
       type: [outreachSchema],
       default: [],

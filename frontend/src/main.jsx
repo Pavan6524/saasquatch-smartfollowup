@@ -8,8 +8,8 @@ import React, {
 import { createRoot } from "react-dom/client";
 import "./style.css";
 
-
 const API = "https://saasquatch-smartfollowup.onrender.com/api";
+
 
 const apiRequest = async (
   url,
@@ -156,9 +156,10 @@ function App() {
 
   const [draft, setDraft] = useState(null);
 
-  const [subject, setSubject] = useState("");
-  const [body, setBody] = useState("");
-  const [schedule, setSchedule] = useState("");
+  const [recipientEmail, setRecipientEmail] = useState("");
+const [subject, setSubject] = useState("");
+const [body, setBody] = useState("");
+const [schedule, setSchedule] = useState("");
 
   const [busy, setBusy] = useState(false);
 const [busyAction, setBusyAction] = useState("");
@@ -209,10 +210,7 @@ const [msgType, setMsgType] = useState("");
   // ----------------------------------------------------
 // LOAD LEADS
 // ----------------------------------------------------
-
- const load = async () => {
-  setLoading(true);
-
+const load = async () => {
   try {
     const data = await apiRequest(
       `${API}/leads?q=${encodeURIComponent(q)}`
@@ -232,10 +230,16 @@ const [msgType, setMsgType] = useState("");
   }
 };
 
-useEffect(() => {
-  load();
-}, []);
 
+
+
+useEffect(() => {
+  const timer = setTimeout(() => {
+    load();
+  }, 300);
+
+  return () => clearTimeout(timer);
+}, [q]);
 // ----------------------------------------------------
 // STATS
 // ----------------------------------------------------
@@ -306,6 +310,7 @@ const analytics = useMemo(() => {
 
 const open = (lead) => {
   setSelected(lead);
+  setRecipientEmail(lead.email || "");
   setDraft(null);
   setSubject("");
   setBody("");
@@ -409,6 +414,15 @@ const open = (lead) => {
   // ----------------------------------------------------
 
   const send = async () => {
+if (
+  !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+    recipientEmail.trim()
+  )
+) {
+  setMsg("Please enter a valid recipient email address.");
+  setMsgType("error");
+  return;
+}
   if (!selected) return;
 
   if (!subject.trim() || !body.trim()) {
@@ -418,8 +432,7 @@ const open = (lead) => {
     setMsgType("error");
     return;
   }
-
-  setBusy(true);
+setBusy(true);
   setBusyAction("send");
   setMsg("");
   setMsgType("");
@@ -432,10 +445,11 @@ const open = (lead) => {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          subject,
-          body,
-        }),
+       body: JSON.stringify({
+  recipientEmail: recipientEmail.trim(),
+  subject,
+  body,
+}),
       }
     );
 
@@ -456,8 +470,7 @@ const open = (lead) => {
       "Failed to send follow-up:",
       error
     );
-
-    setMsg(
+setMsg(
       error.message ||
         "Failed to send follow-up."
     );
@@ -473,7 +486,16 @@ const open = (lead) => {
   // ----------------------------------------------------
 
   const sched = async () => {
-  if (!selected) return;
+    if (
+  !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+    recipientEmail.trim()
+  )
+) {
+  setMsg("Please enter a valid recipient email address.");
+  setMsgType("error");
+  return;
+}
+if (!selected) return;
 
   if (!subject.trim() || !body.trim()) {
     setMsg(
@@ -532,11 +554,11 @@ const open = (lead) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          subject,
-          body,
-          scheduledAt:
-            scheduledDate.toISOString(),
-        }),
+  recipientEmail: recipientEmail.trim(),
+  subject,
+  body,
+  scheduledAt: scheduledDate.toISOString(),
+}),
       }
     );
 
@@ -984,6 +1006,9 @@ const open = (lead) => {
     Search
   </button>
 </div>
+<div className="leads-table-container">
+  {/* Keep your existing leads table here */}
+</div>
 
         {/* ------------------------------------------
             MESSAGE
@@ -1212,6 +1237,8 @@ const open = (lead) => {
 
                   const isSent =
                     h.status === "SENT";
+                    const isFailed = h.status === "FAILED";
+const isCancelled = h.status === "CANCELLED";
 
                   return (
                     <article
@@ -1238,24 +1265,37 @@ const open = (lead) => {
                             h.date
                         )}
                       </small>
-
-                      {/* STATUS */}
-
-                      {isSent && (
+                        {/* STATUS */}
+                        {isSent && (
                         <span className="history-status sent-status">
                           ✓ SENT
                         </span>
-                      )}
+                      )}             {isScheduled && (
+  <span className="history-status scheduled-status">
+    ⏰ SCHEDULED
+  </span>
+)}
 
-                      {isScheduled && (
-                        <span className="history-status scheduled-status">
-                          ⏰ SCHEDULED
-                        </span>
-                      )}
+{isFailed && (
+  <span className="history-status failed-status">
+    ✕ FAILED
+  </span>
+)}
+{isFailed && h.lastError && (
+  <p className="history-error">
+    Reason: {h.lastError}
+  </p>
+)}
+{isCancelled && (
+  <span className="history-status cancelled-status">
+    CANCELLED
+  </span>
+)}
 
-                      <strong>
-                        {h.subject}
-                      </strong>
+<strong>
+  {h.subject}
+</strong>
+
 
                       <p>
                         {h.body}
@@ -1386,26 +1426,53 @@ const open = (lead) => {
                     : "Editing the schedule for this scheduled follow-up."}
                 </div>
               )}
+              {/* RECIPIENT EMAIL */}
+<label htmlFor="follow-up-recipient">
+  Recipient email{" "}
+  <span
+    style={{
+      fontSize: "11px",
+      fontWeight: 400,
+      color: "#7b8495",
+    }}
+  >
+    (For testing: enter your own email to receive the follow-up in real time.)
+  </span>
+</label>
 
-              {/* SUBJECT */}
+<input
+  id="follow-up-recipient"
+  name="recipientEmail"
+  type="email"
+  autoComplete="email"
+  required
+  value={recipientEmail}
+  onChange={(e) => setRecipientEmail(e.target.value)}
+  disabled={editMode === "schedule" || busy}
+  placeholder="name@company.com"
+/>
 
-              <label>
-                Subject
-              </label>
+<small>
+  Enter an inbox you can access. Email delivery depends on your provider's sender verification rules.
+</small>
 
-              <input
-                ref={subjectInputRef}
-                value={subject}
-                onChange={(e) =>
-                  setSubject(
-                    e.target.value
-                  )
-                }
-                disabled={
-                  editMode ===
-                  "schedule"
-                }
-              />
+{/* SUBJECT */}
+
+<label>
+  Subject
+</label>
+
+<input
+  ref={subjectInputRef}
+  value={subject}
+  onChange={(e) =>
+    setSubject(e.target.value)
+  }
+  disabled={
+    editMode === "schedule"
+  }
+/>
+
 
               {/* MESSAGE */}
 
