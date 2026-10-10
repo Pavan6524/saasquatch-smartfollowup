@@ -7,11 +7,15 @@ Prototype enhancement inspired by the publicly accessible SaaSquatch lead-genera
 ## MVP
 - SaaSquatch-style lead table
 - Outreach status: Not Contacted, Contacted, Follow-up Due, Replied
-- Outreach history
-- Generate contextual follow-up draft
-- Edit, send, or schedule follow-up
-- Express API with demo in-memory data
-- MongoDB-ready direction for production
+- Outreach history with scheduled, sent, failed, and cancelled statuses
+- Generate contextual follow-up drafts
+- Edit follow-up email content and recipient
+- Send follow-up emails using Nodemailer and Gmail SMTP
+- Schedule, edit, and cancel follow-ups
+- Express REST API with MongoDB persistence
+- Background worker that checks for due follow-ups every 10 seconds
+- React and Vite frontend
+- Deployed frontend on Vercel and backend on Render
 
 ## Run
 
@@ -21,7 +25,10 @@ cd backend
 npm install
 npm run dev
 ```
+
 API: http://localhost:5000
+
+Configure the required environment variables in `backend/.env`, including your MongoDB connection string and Gmail SMTP credentials. Never commit `.env` or expose email passwords and database credentials.
 
 ### Frontend
 Open a second terminal:
@@ -30,10 +37,13 @@ cd frontend
 npm install
 npm run dev
 ```
-Open the Vite URL, normally http://localhost:5173
+
+Open the Vite URL, normally http://localhost:5173.
 
 ## Scope
 This prototype intentionally does not rebuild SaaSquatch scraping. It focuses on the follow-up workflow so the five-hour development window is spent on one complete, business-relevant feature.
 
 ## Production direction
-Use MongoDB for persistence, Redis + a job queue for scheduled follow-ups, an email provider such as Resend/SendGrid/AWS SES, provider webhooks for reply detection, rate limits, retries, audit logs, and tenant-level authorization.
+The current implementation uses MongoDB for persistence, Nodemailer with Gmail SMTP for email delivery, and a background worker for scheduled follow-ups.
+
+For a more scalable production environment, future improvements could include Redis and a dedicated job queue, an email provider with a supported HTTPS API such as Resend/SendGrid/AWS SES, provider webhooks for delivery and reply detection, rate limits, retry handling, audit logs, monitoring, and tenant-level authorization.
